@@ -32,3 +32,11 @@ numpy
 # Streamlit frontend
 streamlit
 requests
+
+# Document & URL parsing
+beautifulsoup4
+python-docx
+PyPDF2
+
+# LLM 
+groq
