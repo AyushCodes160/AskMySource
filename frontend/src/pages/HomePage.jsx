@@ -244,19 +244,21 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Card 2 — PDF/Doc (Disabled) */}
+          {/* Card 2 — PDF/Doc (Active) */}
           <div
-            className="action-card disabled animate-fade-in-up delay-6"
+            className="action-card animate-fade-in-up delay-6"
+            onClick={() => navigate("/doc")}
+            role="button"
+            tabIndex={0}
             id="analyse-pdf"
           >
-            <span className="coming-soon-tag">Coming Soon</span>
             <div className="action-card-icon">⊞</div>
             <h3 className="action-card-title">Analyse PDF / Doc</h3>
             <p className="action-card-desc">
               Upload research papers, documentation, or any text files and extract insights instantly.
             </p>
             <div className="action-card-cta">
-              <span>Coming Soon</span>
+              <span>Get Started</span>
               <span className="action-card-cta-arrow">→</span>
             </div>
           </div>

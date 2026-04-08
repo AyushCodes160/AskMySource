@@ -61,3 +61,50 @@ export async function getStatus() {
   if (!res.ok) throw new Error("Backend not reachable");
   return res.json();
 }
+
+/**
+ * Upload documents to be indexed.
+ *
+ * @param {File[]} files - Array of File objects
+ * @returns {Promise<object>} Response from /upload_doc
+ */
+export async function uploadDocs(files) {
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append("files", files[i]);
+  }
+
+  const res = await fetch(`${API_URL}/upload_doc`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to upload document(s)");
+  }
+
+  return res.json();
+}
+
+/**
+ * Ask a question about the loaded documents.
+ * 
+ * @param {string} question - The user's question
+ * @param {Array} history - Chat history
+ * @returns {Promise<object>} Response from /ask_doc
+ */
+export async function askDocQuestion(question, history = []) {
+  const res = await fetch(`${API_URL}/ask_doc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to get answer");
+  }
+
+  return res.json();
+}

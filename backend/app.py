@@ -17,8 +17,12 @@ from pydantic import BaseModel, Field
 import clone_repo as clone_module
 import ingest
 import rag
+import doc_ingest
+import doc_rag
 import model as model_module
-
+from fastapi import UploadFile, File, Form
+from typing import List
+import shutil
 
 # ═══════════════════════════════════════════════════════════════
 # Pydantic schemas (request / response shapes)
@@ -84,6 +88,8 @@ class StatusResponse(BaseModel):
     embed_model:  str
     base_model:   str
     current_repo: str
+    doc_index_loaded: bool
+    doc_chunk_count:  int
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -96,13 +102,20 @@ _current_repo = ""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Pre-load FAISS index on startup if it exists."""
-    print("Starting up - checking for existing FAISS index...")
+    """Pre-load FAISS indexes on startup if they exist."""
+    print("Starting up - checking for existing generic code FAISS index...")
     try:
         rag._load_resources()
-        print("FAISS index loaded successfully.")
+        print("Code FAISS index loaded successfully.")
     except FileNotFoundError:
-        print("No FAISS index found. Load a repo via /load_repo first.")
+        print("No generic Code FAISS index found.")
+        
+    print("Starting up - checking for existing document FAISS index...")
+    try:
+        doc_rag._load_resources()
+        print("Document FAISS index loaded successfully.")
+    except FileNotFoundError:
+        print("No Document FAISS index found.")
 
     # Model is loaded lazily on first /ask call (avoids startup crashes)
     yield
@@ -263,17 +276,114 @@ async def ask(request: AskRequest):
         latency_ms=latency_ms,
     )
 
+@app.post("/upload_doc")
+async def upload_doc(files: List[UploadFile] = File(...)):
+    """Upload documents and index them."""
+    doc_ingest.ensure_dirs()
+    saved_paths = []
+    file_names = []
+
+    for file in files:
+        file_path = os.path.join(doc_ingest.UPLOAD_DIR, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        saved_paths.append(file_path)
+        file_names.append(file.filename)
+
+    try:
+        total_chunks = doc_ingest.build_doc_index(saved_paths, file_names)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to ingest document(s): {e}"
+        )
+
+    if total_chunks == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No readable text found in the uploaded document(s)."
+        )
+
+    try:
+        doc_rag.reload_index()
+    except Exception as e:
+         raise HTTPException(
+            status_code=500,
+            detail=f"Document index built but failed to reload: {e}"
+        )
+
+    return {"status": "ok", "message": f"Successfully indexed {total_chunks} chunks from docs: {', '.join(file_names)}"}
+
+@app.post("/ask_doc", response_model=AskResponse)
+async def ask_doc(request: AskRequest):
+    """Ask a question based on uploaded documents."""
+    t_start = time.time()
+    
+    try:
+        chunks = doc_rag.retrieve(request.question, top_k=10)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No document index loaded: {e}. Upload a document first."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieval error: {e}")
+
+    if not chunks:
+        raise HTTPException(
+            status_code=404,
+            detail="No relevant document sections found."
+        )
+
+    context_parts = []
+    for i, chunk in enumerate(chunks, 1):
+        context_parts.append(
+            f"[Source {i} - {chunk['file_name']}]\n{chunk['chunk_text']}"
+        )
+    context = "\n\n".join(context_parts)
+
+    try:
+        answer = model_module.generate_answer(context, request.question, request.history)
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Generation error: {e}")
+
+    sources = [
+        SourceItem(
+            file_path=c["file_name"],
+            score=round(c["score"], 4),
+            excerpt=c["chunk_text"][:200],
+        )
+        for c in chunks
+    ]
+
+    latency_ms = int((time.time() - t_start) * 1000)
+
+    return AskResponse(
+        answer=answer,
+        sources=sources,
+        latency_ms=latency_ms,
+    )
+
+
 
 @app.get("/status", response_model=StatusResponse)
 async def status():
     """Health check: reports whether index and model are loaded."""
     index_loaded = rag._faiss_index is not None
     model_loaded = model_module._model is not None
+    doc_index_loaded = doc_rag.is_loaded()
 
     chunk_count = 0
     if index_loaded:
         try:
             chunk_count = rag.get_chunk_count()
+        except Exception:
+            pass
+            
+    doc_chunk_count = 0
+    if doc_index_loaded:
+        try:
+            doc_chunk_count = doc_rag.get_chunk_count()
         except Exception:
             pass
 
@@ -284,6 +394,8 @@ async def status():
         embed_model="sentence-transformers/all-MiniLM-L6-v2",
         base_model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         current_repo=_current_repo,
+        doc_index_loaded=doc_index_loaded,
+        doc_chunk_count=doc_chunk_count,
     )
 
 
