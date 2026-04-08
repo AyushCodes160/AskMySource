@@ -12,6 +12,7 @@ import "./ChatPage.css"; // Reuse existing dark theme chat styles
 export default function DocPage() {
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState(null);
 
@@ -45,6 +46,25 @@ export default function DocPage() {
   const handleFileChange = (e) => {
     if (e.target.files) {
       setSelectedFiles(Array.from(e.target.files));
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setSelectedFiles(Array.from(e.dataTransfer.files));
+      e.dataTransfer.clearData();
     }
   };
 
@@ -124,24 +144,36 @@ export default function DocPage() {
 
       {/* Upload Input Panel */}
       <div className="repo-panel">
-        <div className="repo-panel-inner">
-          <div className="repo-panel-label">
+        <div 
+          className={`repo-panel-inner drag-drop-zone ${isDragging ? 'drag-active' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <div className="repo-panel-label" style={{ justifyContent: "center" }}>
             <span className="repo-panel-label-num">1</span>
             Upload & Index Documents (PDF, DOCX, TXT)
           </div>
-          <div className="repo-input-row" style={{ alignItems: "center" }}>
+          
+          <div className="drag-drop-text">
+            Drag and drop files here, or click to select
+          </div>
+
+          <div className="repo-input-row" style={{ alignItems: "center", justifyContent: "center" }}>
             <input
               type="file"
               multiple
               accept=".pdf,.docx,.doc,.txt,.md,.csv,.rtf"
               onChange={handleFileChange}
-              style={{
-                flex: 1,
-                color: "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.85rem",
-              }}
+              id="file-upload"
+              style={{ display: "none" }}
             />
+            <label htmlFor="file-upload" className="file-upload-label">
+              Choose Files
+            </label>
+            <span className="selected-files-count">
+              {selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : ""}
+            </span>
             <button
               className="repo-load-btn"
               onClick={handleUpload}
@@ -150,6 +182,7 @@ export default function DocPage() {
               {uploading ? "Uploading..." : "Upload & Index"}
             </button>
           </div>
+
           {uploadMessage && (
             <p className="repo-message success">{uploadMessage}</p>
           )}
