@@ -108,3 +108,46 @@ export async function askDocQuestion(question, history = []) {
 
   return res.json();
 }
+
+/**
+ * Load and scrape URLs.
+ *
+ * @param {string[]} urls - Array of URLs
+ * @returns {Promise<object>} Response from /load_link
+ */
+export async function loadLinks(urls) {
+  const res = await fetch(`${API_URL}/load_link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to load link(s)");
+  }
+
+  return res.json();
+}
+
+/**
+ * Ask a question about the scraped links.
+ * 
+ * @param {string} question - The user's question
+ * @param {Array} history - Chat history
+ * @returns {Promise<object>} Response from /ask_link
+ */
+export async function askLinkQuestion(question, history = []) {
+  const res = await fetch(`${API_URL}/ask_link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to get answer");
+  }
+
+  return res.json();
+}

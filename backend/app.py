@@ -19,6 +19,8 @@ import ingest
 import rag
 import doc_ingest
 import doc_rag
+import link_ingest
+import link_rag
 import model as model_module
 from fastapi import UploadFile, File, Form
 from typing import List
@@ -49,6 +51,13 @@ class LoadRepoResponse(BaseModel):
     repo_name:   str
     total_chunks: int
     message:     str
+
+class LoadLinkRequest(BaseModel):
+    """Request body for POST /load_link."""
+    urls: List[str] = Field(
+        ...,
+        description="List of URLs to scrape."
+    )
 
 
 class AskRequest(BaseModel):
@@ -90,6 +99,8 @@ class StatusResponse(BaseModel):
     current_repo: str
     doc_index_loaded: bool
     doc_chunk_count:  int
+    link_index_loaded: bool
+    link_chunk_count:  int
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -116,6 +127,13 @@ async def lifespan(app: FastAPI):
         print("Document FAISS index loaded successfully.")
     except FileNotFoundError:
         print("No Document FAISS index found.")
+        
+    print("Starting up - checking for existing link FAISS index...")
+    try:
+        link_rag._load_resources()
+        print("Link FAISS index loaded successfully.")
+    except FileNotFoundError:
+        print("No Link FAISS index found.")
 
     # Model is loaded lazily on first /ask call (avoids startup crashes)
     yield
@@ -364,6 +382,87 @@ async def ask_doc(request: AskRequest):
         latency_ms=latency_ms,
     )
 
+@app.post("/load_link")
+async def load_link(request: LoadLinkRequest):
+    """Scrape and index URLs."""
+    link_ingest.ensure_dirs()
+    if not request.urls:
+         raise HTTPException(status_code=400, detail="No URLs provided")
+         
+    try:
+        total_chunks = link_ingest.build_link_index(request.urls)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to scrape links: {e}"
+        )
+
+    if total_chunks == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No readable text found in the provided URLs."
+        )
+
+    try:
+        link_rag.reload_index()
+    except Exception as e:
+         raise HTTPException(
+            status_code=500,
+            detail=f"Link index built but failed to reload: {e}"
+        )
+
+    return {"status": "ok", "message": f"Successfully indexed {total_chunks} chunks from links."}
+
+
+@app.post("/ask_link", response_model=AskResponse)
+async def ask_link(request: AskRequest):
+    """Ask a question based on uploaded links."""
+    t_start = time.time()
+    
+    try:
+        chunks = link_rag.retrieve(request.question, top_k=10)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No link index loaded: {e}. Submit a link first."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieval error: {e}")
+
+    if not chunks:
+        raise HTTPException(
+            status_code=404,
+            detail="No relevant link sections found."
+        )
+
+    context_parts = []
+    for i, chunk in enumerate(chunks, 1):
+        context_parts.append(
+            f"[Source {i} - {chunk['url']}]\n{chunk['chunk_text']}"
+        )
+    context = "\n\n".join(context_parts)
+
+    try:
+        answer = model_module.generate_answer(context, request.question, request.history)
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Generation error: {e}")
+
+    sources = [
+        SourceItem(
+            file_path=c["url"],
+            score=round(c["score"], 4),
+            excerpt=c["chunk_text"][:200],
+        )
+        for c in chunks
+    ]
+
+    latency_ms = int((time.time() - t_start) * 1000)
+
+    return AskResponse(
+        answer=answer,
+        sources=sources,
+        latency_ms=latency_ms,
+    )
 
 
 @app.get("/status", response_model=StatusResponse)
@@ -372,6 +471,7 @@ async def status():
     index_loaded = rag._faiss_index is not None
     model_loaded = model_module._model is not None
     doc_index_loaded = doc_rag.is_loaded()
+    link_index_loaded = link_rag.is_loaded()
 
     chunk_count = 0
     if index_loaded:
@@ -386,6 +486,13 @@ async def status():
             doc_chunk_count = doc_rag.get_chunk_count()
         except Exception:
             pass
+            
+    link_chunk_count = 0
+    if link_index_loaded:
+        try:
+            link_chunk_count = link_rag.get_chunk_count()
+        except Exception:
+            pass
 
     return StatusResponse(
         index_loaded=index_loaded,
@@ -396,6 +503,8 @@ async def status():
         current_repo=_current_repo,
         doc_index_loaded=doc_index_loaded,
         doc_chunk_count=doc_chunk_count,
+        link_index_loaded=link_index_loaded,
+        link_chunk_count=link_chunk_count,
     )
 
 

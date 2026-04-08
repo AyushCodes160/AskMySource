@@ -263,19 +263,21 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Card 3 — Link/Wiki (Disabled) */}
+          {/* Card 3 — Link (Active) */}
           <div
-            className="action-card disabled animate-fade-in-up delay-7"
+            className="action-card animate-fade-in-up delay-7"
+            onClick={() => navigate("/link")}
+            role="button"
+            tabIndex={0}
             id="analyse-link"
           >
-            <span className="coming-soon-tag">Coming Soon</span>
             <div className="action-card-icon">⊕</div>
             <h3 className="action-card-title">Analyse Link</h3>
             <p className="action-card-desc">
               Paste any documentation URL, wiki page, or article link and query the content with AI.
             </p>
             <div className="action-card-cta">
-              <span>Coming Soon</span>
+              <span>Get Started</span>
               <span className="action-card-cta-arrow">→</span>
             </div>
           </div>
